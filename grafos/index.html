@@ -1,189 +1,174 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Simulador de Red de Transferencia de Datos</title>
-    <script
-      type="text/javascript"
-      src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"
-    ></script>
-    <style>
-      #mynetwork {
-        width: 800px;
-        height: 500px;
-        border: 1px solid lightgray;
+<head>
+  <meta charset="UTF-8" />
+  <title>Simulador de Red de Transferencia de Datos</title>
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <style>
+    #mynetwork {
+      width: 800px;
+      height: 500px;
+      border: 1px solid lightgray;
+    }
+    #details, #status, #routes {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="mynetwork"></div>
+  <div id="details"></div>
+  <input type="number" id="requestInput" placeholder="Ingrese número de peticiones" />
+  <div id="status"></div>
+  <div id="routes"></div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const nodos = new vis.DataSet();
+      const aristas = new vis.DataSet();
+      const cuentaNodos = 10;  // Total de estados en el autómata
+      const estadoInicial = 0; // Estado inicial q0
+      const estadoFinal = cuentaNodos - 1; // Estado final q9
+      let estadosActivos = new Array(cuentaNodos).fill(true);  // Estados activos
+      let estadoFallidoActual = null;  // Estado actual que falla
+      let listaTransiciones = Array.from({ length: cuentaNodos }, () => []);  // Lista de transiciones (como lista de adyacencia)
+      let alfabeto = new Set();  // Alfabeto del autómata (pesos únicos)
+  
+      const opciones = {
+        edges: {
+          smooth: {
+            type: "continuous",
+          },
+        },
+        physics: {
+          stabilization: false,
+        },
+        layout: {
+          randomSeed: undefined,
+          improvedLayout: true,
+        },
+      };
+  
+      // Inicialización de estados y transiciones
+      for (let i = 0; i < cuentaNodos; i++) {
+        nodos.add({ id: i, label: "Estado " + i });
+        if (i < cuentaNodos - 1) {
+          agregarTransicion(i, i + 1);
+        }
       }
-      #details,
-      #status,
-      #routes {
-        margin-top: 20px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="mynetwork"></div>
-    <div id="details"></div>
-    <input
-      type="number"
-      id="requestInput"
-      placeholder="Ingrese número de peticiones"
-    />
-    <div id="status"></div>
-    <div id="routes"></div>
-
-    <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        const nodes = new vis.DataSet();
-        const edges = new vis.DataSet();
-        const nodeCount = 10;
-        let activeNodes = new Array(nodeCount).fill(true);
-        let currentFailedNode = null;
-        let adjacencyList = Array.from({ length: nodeCount }, () => []);
-
-        const options = {
-          edges: {
-            smooth: {
-              type: "continuous",
-            },
-          },
-          physics: {
-            stabilization: false,
-          },
-          layout: {
-            randomSeed: undefined,
-            improvedLayout: true,
-          },
-        };
-
-        for (let i = 0; i < nodeCount; i++) {
-          nodes.add({ id: i, label: "Nodo " + i });
-          if (i < nodeCount - 1) {
-            // Direct sequential connections
-            addEdge(i, i + 1);
+  
+      // Crear conexiones adicionales aleatorias
+      for (let i = 1; i < cuentaNodos; i++) {
+        let conexionesAdicionales = Math.floor(Math.random() * 2) + 1;
+        while (conexionesAdicionales--) {
+          let to = Math.floor(Math.random() * (cuentaNodos - i)) + i + 1;
+          if (to < cuentaNodos) {
+            agregarTransicion(i, to);
           }
         }
-
-        // Create additional random connections but ensure no node points to node 0
-        for (let i = 1; i < nodeCount; i++) {
-          let extraConnections = Math.floor(Math.random() * 2) + 1; // Ensure at least one extra connection for longer paths
-          while (extraConnections--) {
-            let to = Math.floor(Math.random() * (nodeCount - i)) + i + 1; // Avoid pointing to node 0 and create forward connections
-            if (to < nodeCount) {
-              addEdge(i, to);
-            }
-          }
-        }
-
-        function addEdge(from, to) {
-          const weight = Math.floor(Math.random() * 5) + 1;
-          edges.add({
-            from: from,
-            to: to,
-            label: String(weight),
-            arrows: "to",
-            font: { align: "top" },
-            color: { color: "blue" },
+      }
+  
+      function agregarTransicion(de, a) {
+        const peso = Math.floor(Math.random() * 5) + 1;
+        alfabeto.add(peso);
+        aristas.add({
+          from: de,
+          to: a,
+          label: String(peso),
+          arrows: "to",
+          font: { align: "top" },
+          color: { color: "blue" },
+        });
+        listaTransiciones[de].push(a);
+      }
+  
+      let red = new vis.Network(
+        document.getElementById("mynetwork"),
+        { nodes: nodos, edges: aristas },
+        opciones
+      );
+  
+      function actualizarRed() {
+        red.redraw();
+      }
+  
+      function simularFalloNodo() {
+        if (estadoFallidoActual !== null) {
+          estadosActivos[estadoFallidoActual] = true;
+          red.body.data.nodes.update({
+            id: estadoFallidoActual,
+            color: "blue",
           });
-          adjacencyList[from].push(to);
         }
-
-        let network = new vis.Network(
-          document.getElementById("mynetwork"),
-          { nodes, edges },
-          options
-        );
-
-        function updateNetwork() {
-          network.redraw();
-        }
-
-        function findPath(source, target) {
-          if (!activeNodes[source] || !activeNodes[target]) return null;
-          let queue = [[source]];
-          let visited = new Array(nodeCount).fill(false);
-          visited[source] = true;
-
-          while (queue.length > 0) {
-            let path = queue.shift();
-            let node = path[path.length - 1];
-
-            if (node === target) return path;
-
-            adjacencyList[node].forEach((adjacent) => {
-              if (!visited[adjacent] && activeNodes[adjacent]) {
-                visited[adjacent] = true;
-                queue.push([...path, adjacent]);
-              }
-            });
-          }
-          return null;
-        }
-
-        function simulateNodeFailure() {
-          if (currentFailedNode !== null) {
-            activeNodes[currentFailedNode] = true;
-            network.body.data.nodes.update({
-              id: currentFailedNode,
-              color: "blue",
-            });
-          }
-
-          let potentialNodes = [];
-          for (let i = 1; i < nodeCount - 1; i++) {
-            if (activeNodes[i] && i !== currentFailedNode) {
-              potentialNodes.push(i);
-            }
-          }
-
-          if (potentialNodes.length > 0) {
-            let nodeToFail =
-              potentialNodes[Math.floor(Math.random() * potentialNodes.length)];
-            activeNodes[nodeToFail] = false;
-            currentFailedNode = nodeToFail;
-            updateNetwork();
-            document.getElementById(
-              "status"
-            ).innerHTML += `<br>Nuevo nodo caído: Nodo ${currentFailedNode}`;
+  
+        let estadosPotenciales = [];
+        for (let i = 1; i < cuentaNodos - 1; i++) {
+          if (estadosActivos[i] && i !== estadoFallidoActual) {
+            estadosPotenciales.push(i);
           }
         }
-
-        function handleRequests(requestsCount) {
-          simulateNodeFailure();
-          for (let i = 0; i < requestsCount; i++) {
-            if (i % 10 === 0 && i !== 0) {
-              simulateNodeFailure();
-            }
-            let path = findPath(0, nodeCount - 1);
-            let pathDescription = path
-              ? `Petición ${i + 1}: Ruta tomada [${path.join(" -> ")}]`
-              : `Petición ${i + 1}: No hay ruta disponible`;
-            document.getElementById("routes").innerHTML +=
-              pathDescription + "<br>";
-          }
+  
+        if (estadosPotenciales.length > 0) {
+          let estadoAFallar = estadosPotenciales[Math.floor(Math.random() * estadosPotenciales.length)];
+          estadosActivos[estadoAFallar] = false;
+          estadoFallidoActual = estadoAFallar;
+          actualizarRed();
+          document.getElementById("status").innerHTML += `<br>Nuevo estado caído: Estado ${estadoFallidoActual}`;
         }
-
-        document
-          .getElementById("requestInput")
-          .addEventListener("keypress", function (event) {
-            if (event.key === "Enter") {
-              let requestsCount = parseInt(this.value, 10);
-              if (!isNaN(requestsCount) && requestsCount > 0) {
-                this.value = "";
-                document.getElementById("status").innerHTML = ""; // Clear previous status
-                document.getElementById("routes").innerHTML = ""; // Clear previous routes
-                handleRequests(requestsCount);
-              } else {
-                alert(
-                  "Por favor, ingrese un número de peticiones válido y mayor que cero."
-                );
-              }
+      }
+  
+      function manejarSolicitudes(cantidadSolicitudes) {
+        simularFalloNodo();
+        for (let i = 0; i < cantidadSolicitudes; i++) {
+          if (i % 10 === 0 && i !== 0) {
+            simularFalloNodo();
+          }
+          let ruta = encontrarCamino(estadoInicial, estadoFinal);
+          let descripcionRuta = ruta
+            ? `Petición ${i + 1}: Ruta tomada [${ruta.join(" -> ")}]`
+            : `Petición ${i + 1}: No hay ruta disponible`;
+          document.getElementById("routes").innerHTML +=
+            descripcionRuta + "<br>";
+        }
+      }
+  
+      function encontrarCamino(origen, destino) {
+        if (!estadosActivos[origen] || !estadosActivos[destino]) return null;
+        let cola = [[origen]];
+        let visitados = new Array(cuentaNodos).fill(false);
+        visitados[origen] = true;
+  
+        while (cola.length > 0) {
+          let camino = cola.shift();
+          let estado = camino[camino.length - 1];
+  
+          if (estado === destino) return camino;
+  
+          listaTransiciones[estado].forEach((siguienteEstado) => {
+            if (!visitados[siguienteEstado] && estadosActivos[siguienteEstado]) {
+              visitados[siguienteEstado] = true;
+              cola.push([...camino, siguienteEstado]);
             }
           });
-
-        document.getElementById(
-          "details"
-        ).innerHTML = `Nodos: ${nodes.length}, Aristas: ${edges.length}`;
+        }
+        return null;
+      }
+  
+      document.getElementById("requestInput").addEventListener("keypress", function (evento) {
+        if (evento.key === "Enter") {
+          let cantidadSolicitudes = parseInt(this.value, 10);
+          if (!isNaN(cantidadSolicitudes) && cantidadSolicitudes > 0) {
+            this.value = "";
+            document.getElementById("status").innerHTML = "";  // Limpiar estado anterior
+            document.getElementById("routes").innerHTML = "";  // Limpiar rutas anteriores
+            manejarSolicitudes(cantidadSolicitudes);
+          } else {
+            alert("Por favor, ingrese un número de peticiones válido y mayor que cero.");
+          }
+        }
       });
-    </script>
-  </body>
+    });
+  </script>
+  
+</body>
 </html>
